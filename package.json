@@ -10,7 +10,7 @@
     "test":             "jest --coverage"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.9",
+    "@whiskeysockets/baileys": "^6.7.18",
     "bullmq":                  "^5.7.0",
     "mongoose":                "^8.3.4",
     "ioredis":                 "^5.3.2",

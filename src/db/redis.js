@@ -1,16 +1,5 @@
 'use strict';
 
-/**
- * REDIS CONNECTION MANAGER — PirateClick by dopinity
- *
- * Supports two connection modes:
- *   1. REDIS_URL  → Upstash / cloud Redis (recommended)
- *   2. REDIS_HOST + REDIS_PORT + REDIS_PASSWORD → local Redis
- *
- * Singleton — never creates more than 2 connections total.
- * Compatible with BullMQ (maxRetriesPerRequest: null).
- */
-
 const Redis  = require('ioredis');
 const logger = require('../utils/logger');
 
@@ -20,7 +9,8 @@ let subscriber = null;
 function buildConfig(extra = {}) {
   return {
     maxRetriesPerRequest: null,
-    enableReadyCheck:     false, // false = avoids Upstash "not ready" false errors
+    enableReadyCheck:     false,
+    enableOfflineQueue:   false,   // ← kritik: timeout yerine hemen hata ver
     lazyConnect:          false,
     connectTimeout:       10000,
     commandTimeout:       5000,
@@ -37,7 +27,6 @@ function createClient(label) {
   let inst;
 
   if (process.env.REDIS_URL) {
-    // rediss:// URL already carries TLS — no extra tls:{} needed
     inst = new Redis(process.env.REDIS_URL, buildConfig());
   } else {
     inst = new Redis(buildConfig({
@@ -49,15 +38,28 @@ function createClient(label) {
 
   inst.on('connect',      ()    => logger.info(`Redis [${label}] connected`));
   inst.on('ready',        ()    => logger.info(`Redis [${label}] ready`));
-  inst.on('error',        (err) => logger.error({ err }, `Redis [${label}] error`));
+  inst.on('error',        (err) => logger.error({ err: err.message }, `Redis [${label}] error`));
   inst.on('close',        ()    => logger.warn(`Redis [${label}] closed`));
   inst.on('reconnecting', (ms)  => logger.warn({ ms }, `Redis [${label}] reconnecting`));
 
   return inst;
 }
 
-function getRedisClient()     { if (!client)     client     = createClient('main');       return client; }
-function getSubscriberClient(){ if (!subscriber) subscriber = createClient('subscriber'); return subscriber; }
-async function pingRedis()    { return getRedisClient().ping(); }
+function getRedisClient()      { if (!client)     client     = createClient('main');       return client; }
+function getSubscriberClient() { if (!subscriber) subscriber = createClient('subscriber'); return subscriber; }
+async function pingRedis()     { return getRedisClient().ping(); }
+
+// Process'in Redis hatası yüzünden çökmesini engelle
+process.on('unhandledRejection', (reason) => {
+  if (reason?.message?.includes('Command timed out') ||
+      reason?.message?.includes('ECONNREFUSED') ||
+      reason?.message?.includes('Redis') ||
+      reason?.code === 'ECONNREFUSED') {
+    logger.warn({ err: reason?.message }, 'Redis error suppressed — process continues');
+    return;
+  }
+  // Diğer gerçek hatalar için loglayıp devam et
+  logger.error({ err: reason }, 'Unhandled rejection');
+});
 
 module.exports = { getRedisClient, getSubscriberClient, pingRedis };

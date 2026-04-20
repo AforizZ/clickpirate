@@ -12,18 +12,15 @@
 const {
   default: makeWASocket,
   DisconnectReason,
-  useMultiFileAuthState,
   fetchLatestBaileysVersion,
   jidNormalizedUser,
 } = require('@whiskeysockets/baileys');
 
-const fs           = require('fs');
 const EventEmitter = require('events');
 const qrcode       = require('qrcode-terminal');
 const logger       = require('../utils/logger');
 const { incomingDriverMessage } = require('./responseEngine');
-
-const SESSION_DIR = process.env.WA_SESSION_PATH || './sessions';
+const { useRedisAuthState }     = require('./redisAuthState');
 
 // ─── Public event bus ─────────────────────────────────────────────────────────
 const waEvents = new EventEmitter();
@@ -39,12 +36,8 @@ function getSocket() { return sock; }
 
 // ─── Connect ──────────────────────────────────────────────────────────────────
 async function connect() {
-  if (!fs.existsSync(SESSION_DIR)) {
-    fs.mkdirSync(SESSION_DIR, { recursive: true });
-  }
-
-  const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
-  const { version }          = await fetchLatestBaileysVersion();
+  const { state, saveCreds, clearSession } = await useRedisAuthState();
+  const { version }                        = await fetchLatestBaileysVersion();
 
   sock = makeWASocket({
     version,
@@ -104,8 +97,8 @@ async function connect() {
         setTimeout(connect, 5000);
       } else {
         // Logged out — clear session so QR is shown fresh on next start
-        logger.warn('WhatsApp logged out — clearing session');
-        fs.rmSync(SESSION_DIR, { recursive: true, force: true });
+        logger.warn('WhatsApp logged out — clearing session from Redis');
+        await clearSession();
       }
     }
   });
